@@ -20,6 +20,8 @@ from ops.framework import StoredState
 from ops.main import main
 from ops.model import ActiveStatus, MaintenanceStatus, WaitingStatus
 
+from charms.nginx_ingress_integrator.v0.ingress import IngressRequires
+
 logger = logging.getLogger(__name__)
 
 class HelloKubeconCharm(CharmBase):
@@ -31,6 +33,13 @@ class HelloKubeconCharm(CharmBase):
         super().__init__(*args)
         self.framework.observe(self.on.install, self._on_install)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
+        self.framework.observe(self.on.pull_site_action, self._pull_site_action)
+
+        self.ingress = IngressRequires(self, {
+            "service-hostname": "hellokubecon.juju",
+            "service-name": self.app.name,
+            "service-port": 8080
+        })
 
     def _on_install(self, _):
         # Download the site
@@ -90,6 +99,11 @@ class HelloKubeconCharm(CharmBase):
         urllib.request.urlretrieve(site_src, "/srv/index.html")
         # Set the unit status back to Active
         self.unit.status = ActiveStatus()
+
+    def _pull_site_action(self, event):
+        """Action handler that pulls the latest site archive and unpacks it"""
+        self._fetch_site()
+        event.set_results({"result": "site pulled"})
 
 
 if __name__ == "__main__":
