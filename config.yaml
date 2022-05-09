@@ -4,7 +4,7 @@
 # Learn more about config at: https://juju.is/docs/sdk/config
 
 options:
-  redirect_map:
+  redirect-map:
     default: https://jnsgr.uk/demo-routes
     description: A URL pointing to a list of redirects for Gosherve.
     type: string

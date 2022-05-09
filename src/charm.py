@@ -13,11 +13,12 @@ develop a new k8s charm using the Operator Framework:
 """
 
 import logging
+import urllib
 
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
-from ops.model import ActiveStatus
+from ops.model import ActiveStatus, MaintenanceStatus, WaitingStatus
 
 logger = logging.getLogger(__name__)
 
@@ -28,37 +29,12 @@ class HelloKubeconCharm(CharmBase):
 
     def __init__(self, *args):
         super().__init__(*args)
-        self.framework.observe(self.on.gosherve_pebble_ready, self._on_gosherve_pebble_ready)
+        self.framework.observe(self.on.install, self._on_install)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
-        self.framework.observe(self.on.fortune_action, self._on_fortune_action)
-        self._stored.set_default(things=[])
 
-    def _on_gosherve_pebble_ready(self, event):
-        # Get a reference the container attribute on the PebbleReadyEvent
-        container = event.workload
-        # Define an initial Pebble layer configuration
-        pebble_layer = {
-            "summary": "gosherve layer",
-            "description": "pebble config layer for gosherve",
-            "services": {
-                "gosherve": {
-                    "override": "replace",
-                    "summary": "gosherve",
-                    "command": "/gosherve",
-                    "startup": "enabled",
-                    "environment": {
-                        "REDIRECT_MAP_URL": "https://jnsgr.uk/demo-routes"
-                },
-            }
-          },
-        }
-        # Add initial Pebble config layer using the Pebble API
-        container.add_layer("gosherve", pebble_layer, combine=True)
-        # Autostart any services that were defined with startup: enabled
-        container.autostart()
-        # Learn more about statuses in the SDK docs:
-        # https://juju.is/docs/sdk/constructs#heading--statuses
-        self.unit.status = ActiveStatus()
+    def _on_install(self, _):
+        # Download the site
+        self._fetch_site()
 
     def _on_config_changed(self, _):
         """Handle the config-changed event"""
@@ -66,37 +42,23 @@ class HelloKubeconCharm(CharmBase):
         container = self.unit.get_container("gosherve")
         # Create a new config layer
         layer = self._gosherve_layer()
-        # Get the current config
-        services = container.get_plan().to_dict().get("services", {})
-        # Check if there are any changes to services
-        if services != layer["services"]:
-            container.add_layer("gosherve", layer, combine=True)
-            logger.info("Added updated layer 'gosherve' to Pebble plan")
-            # Stop the service if it is already running
-            if container.get_service("gosherve").is_running():
-                container.stop("gosherve")
-            # Restart it and report a new status to Juju
-            container.start("gosherve")
-            logger.info("Restarted gosherve service")
-        # All is well, set an ActiveStatus
-        self.unit.status = ActiveStatus()
-            
 
-    def _on_fortune_action(self, event):
-        """Just an example to show how to receive actions.
-
-        TEMPLATE-TODO: change this example to suit your needs.
-        If you don't need to handle actions, you can remove this method,
-        the hook created in __init__.py for it, the corresponding test,
-        and the actions.py file.
-
-        Learn more about actions at https://juju.is/docs/sdk/actions
-        """
-        fail = event.params["fail"]
-        if fail:
-            event.fail(fail)
+        if container.can_connect():
+            # Get the current config
+            services = container.get_plan().to_dict().get("services", {})
+            # Check if there are any changes to services
+            if services != layer["services"]:
+                # Changes were made, add the new layer
+                container.add_layer("gosherve", layer, combine=True)
+                logger.info("Added updated layer 'gosherve' to Pebble plan")
+                # Restart it and report a new status to Juju
+                container.restart("gosherve")
+                logger.info("Restarted gosherve service")
+            # All is well, set an ActiveStatus
+            self.unit.status = ActiveStatus()
         else:
-            event.set_results({"fortune": "A bug in the code is worth two in the documentation."})
+            self.unit.status = WaitingStatus("Waiting for Pebble in workload container")
+            
     def _gosherve_layer(self):
         """ Returns a Pebble configuration layer for Gosherve"""
         return {
@@ -109,12 +71,25 @@ class HelloKubeconCharm(CharmBase):
                     "command": "/gosherve",
                     "startup": "enabled",
                     "environment": {
-                        "REDIRECT_MAP_URL": self.config["redirect_map"]
+                        "REDIRECT_MAP_URL": self.config["redirect-map"],
+                        "WEBROOT": "/srv",
                     },
                 }
             },
         }
 
+    def _fetch_site(self):
+        """Fetch latest copy of website from Github and move into webroot"""
+
+        # Set the site URL
+        site_src = "https://jnsgr.uk/demo-site"
+        # Set some status and do some logging
+        self.unit.status = MaintenanceStatus("Fetching website")
+        logger.info("Downloading site from %s", site_src)
+        # Download the site
+        urllib.request.urlretrieve(site_src, "/srv/index.html")
+        # Set the unit status back to Active
+        self.unit.status = ActiveStatus()
 
 
 if __name__ == "__main__":
