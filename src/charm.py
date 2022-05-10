@@ -15,19 +15,16 @@ develop a new k8s charm using the Operator Framework:
 import logging
 import urllib
 
+from charms.nginx_ingress_integrator.v0.ingress import IngressRequires
 from ops.charm import CharmBase
-from ops.framework import StoredState
 from ops.main import main
 from ops.model import ActiveStatus, MaintenanceStatus, WaitingStatus
 
-from charms.nginx_ingress_integrator.v0.ingress import IngressRequires
-
 logger = logging.getLogger(__name__)
+
 
 class HelloKubeconCharm(CharmBase):
     """Charm the service."""
-
-    _stored = StoredState()
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -36,10 +33,14 @@ class HelloKubeconCharm(CharmBase):
         self.framework.observe(self.on.pull_site_action, self._pull_site_action)
 
         self.ingress = IngressRequires(self, {
-            "service-hostname": "hellokubecon.juju",
+            "service-hostname": self._external_hostname,
             "service-name": self.app.name,
             "service-port": 8080
         })
+
+    @property
+    def _external_hostname(self):
+        return self.config["external-hostname"] or self.app.name
 
     def _on_install(self, _):
         # Download the site
@@ -67,7 +68,7 @@ class HelloKubeconCharm(CharmBase):
             self.unit.status = ActiveStatus()
         else:
             self.unit.status = WaitingStatus("Waiting for Pebble in workload container")
-            
+
     def _gosherve_layer(self):
         """ Returns a Pebble configuration layer for Gosherve"""
         return {
